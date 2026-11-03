@@ -726,36 +726,56 @@ class UMCdbPaths(GlobalVars):
 def _parquetize(path, db: str):
     print(f"{db}   - parquetizing {path}")
     parquet_path = path.replace(".csv", ".parquet").replace(".gz", "")
-    pl.scan_csv(
-        path,
-        schema_overrides={
-            "amount": float,
-            "AMOUNT": float,
-            "dose_given": str,
-            "dose_val_rx": str,
-            "doses_per_24_hrs": float,
-            "patientweight": float,
-            "PATIENTWEIGHT": float,
-            "product_amount_given": str,
-            "RATE": float,
-            "totalamount": float,
-            "TOTALAMOUNT": float,
-            "value": str,
-            "VALUE": str,
-        },
-        infer_schema_length=10000,
-    ).sink_parquet(parquet_path)
+    schema_overrides = {
+        "amount": float,
+        "AMOUNT": float,
+        "dose_given": str,
+        "dose_val_rx": str,
+        "doses_per_24_hrs": float,
+        "patientweight": float,
+        "PATIENTWEIGHT": float,
+        "product_amount_given": str,
+        "RATE": float,
+        "totalamount": float,
+        "TOTALAMOUNT": float,
+        "value": str,
+        "VALUE": str,
+    }
+
+    def _sink(infer_schema_length):
+        pl.scan_csv(
+            path,
+            schema_overrides=schema_overrides,
+            infer_schema_length=infer_schema_length,
+        ).sink_parquet(tmp_path)
+
+    # Write to a temporary file first: a failed conversion must not leave a
+    # truncated parquet file behind (it would be silently reused later).
+    tmp_path = parquet_path + ".tmp"
+    try:
+        _sink(10000)
+    except pl.exceptions.ComputeError as e:
+        # e.g. MIMIC-IV 3.1 emar_detail.infusion_rate contains "___" after
+        # the first 10000 rows -> infer the schema on the whole file instead
+        print(
+            f"{db}   - schema inference on 10000 rows failed "
+            f"({str(e).splitlines()[0]}); retrying with full-file inference"
+        )
+        _sink(None)
+    os.replace(tmp_path, parquet_path)
 
 
 def _parquetize_OMOP(path):
     print(f"OMOP   - parquetizing {path}")
     parquet_path = path.replace(".csv", ".parquet").replace(".gz", "")
+    tmp_path = parquet_path + ".tmp"
     pl.scan_csv(
         path,
         separator="\t",
         infer_schema_length=10000,
         quote_char=None,
-    ).sink_parquet(parquet_path)
+    ).sink_parquet(tmp_path)
+    os.replace(tmp_path, parquet_path)
 
 
 # endregion
