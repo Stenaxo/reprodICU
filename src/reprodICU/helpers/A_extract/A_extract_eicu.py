@@ -905,18 +905,37 @@ class EICUExtractor(EICUPaths):
                 pl.col("nursingchartcelltypevalname").replace_strict(
                     nurse_names_mapping, default=None
                 ),
+            )
+            # optiflow fix: the device mapping must be evaluated AFTER the
+            # renaming above. In a single with_columns both expressions see the
+            # original label ("O2 Admin Device"), so the mapping was never
+            # applied and raw free-text values reached the output.
+            .with_columns(
                 # Map O2 delivery device values
                 pl.when(
                     pl.col("nursingchartcelltypevalname")
                     == "Oxygen delivery system"
                 )
                 .then(
-                    pl.col("nursingchartvalue").replace_strict(
-                        nurse_oxygen_delivery_device_mapping, default=None
+                    self._map_nurse_oxygen_delivery_device(
+                        pl.col("nursingchartvalue"),
+                        nurse_oxygen_delivery_device_mapping,
                     )
                 )
                 .otherwise(pl.col("nursingchartvalue"))
                 .alias("nursingchartvaluestr"),
+            )
+            # optiflow fix: a number typed in the device field ("2",
+            # "100") was read as a numeric value and reached the device
+            # column as "2.0"; device rows keep their text only.
+            .with_columns(
+                pl.when(
+                    pl.col("nursingchartcelltypevalname")
+                    == "Oxygen delivery system"
+                )
+                .then(pl.lit(None, dtype=pl.Float64))
+                .otherwise(pl.col("nursingchartvaluefloat"))
+                .alias("nursingchartvaluefloat")
             )
             .with_columns(
                 # Finalize exclusive columns
@@ -941,6 +960,38 @@ class EICUExtractor(EICUPaths):
         )
 
     # endregion
+
+    # optiflow fix: targets of eicu_nurseCharting_oxygenDeliveryDevices.yaml
+    # that are not harmonized device names. "Tracheostomy mask, oxygen" (trach
+    # collar, T-piece) becomes "Tracheostomy tube" as in MIMIC and in eICU
+    # respiratoryCharting; the other targets ("unknown", "other") are dropped.
+    NURSE_DEVICE_TARGET_ALIASES = {"Tracheostomy mask, oxygen": "Tracheostomy tube"}
+
+    def _map_nurse_oxygen_delivery_device(
+        self, value: pl.Expr, mapping: dict
+    ) -> pl.Expr:
+        """
+        Map eICU "O2 Admin Device" values with the reprodICU mapping file
+        (eicu_nurseCharting_oxygenDeliveryDevices.yaml), exactly as written:
+        exact match on the charted value, as in the original reprodICU code.
+        Values absent from the file, or listed without a target, stay null.
+
+        optiflow fix: targets that are not harmonized device names are
+        aliased (NURSE_DEVICE_TARGET_ALIASES) or set to null.
+        """
+        device_names = set(
+            self.load_mapping(
+                self.mapping_path
+                + "ADDITIONAL_MAPPINGS/oxygen_delivery_device_mapping.yaml"
+            ).keys()
+        )
+        lookup = {}
+        for key, target in mapping.items():
+            target = self.NURSE_DEVICE_TARGET_ALIASES.get(target, target)
+            lookup[key] = target if target in device_names else None
+        return value.cast(pl.String).replace_strict(
+            lookup, default=None, return_dtype=pl.String
+        )
 
     # region in/out TS
     # Extract time series information for intake/output values from the intakeOutput.csv file
