@@ -375,9 +375,16 @@ class GlobalVars(GlobalHelpers):
         self.HEART_RHYTHM_MAP = self.load_many_to_one_mapping(
             mapping_path + "ADDITIONAL_MAPPINGS/heart_rhythm_mapping.yaml"
         )
-        self.OXYGEN_DELIVERY_SYSTEM_MAP = self.load_many_to_one_mapping(
-            mapping_path
-            + "ADDITIONAL_MAPPINGS/oxygen_delivery_device_mapping.yaml"
+        # optiflow fix: the mapping file documents devices whose source value
+        # is already the harmonized name ("-> same name", e.g. Endotracheal
+        # tube, Tracheostomy tube). load_many_to_one_mapping only reads the
+        # listed values, so these source values were mapped to null. Keys now
+        # map to themselves as well.
+        self.OXYGEN_DELIVERY_SYSTEM_MAP = (
+            self.load_many_to_one_mapping_incl_keys(
+                mapping_path
+                + "ADDITIONAL_MAPPINGS/oxygen_delivery_device_mapping.yaml"
+            )
         )
         self.VENTILATOR_MODE_MAP = self.load_many_to_one_mapping(
             mapping_path + "ADDITIONAL_MAPPINGS/ventilator_mode_mapping.yaml"
