@@ -795,6 +795,16 @@ class MIMIC4Extractor(MIMIC4Paths):
                         self.HEART_RHYTHM_MAP, default=None
                     )
                 )
+                # optiflow: 'None' on the oxygen device items means that no
+                # oxygen delivery device is used (room air); the same value
+                # means "no artificial airway" on other items mapped to this
+                # label (MIMIC-III 40 'Airway Type'), which stay unmapped.
+                .when(
+                    (pl.col("label") == "Oxygen delivery system")
+                    & (pl.col("value") == "None")
+                    & pl.col("itemid").is_in([226732])
+                )
+                .then(pl.lit("Room air"))
                 .when(pl.col("label") == "Oxygen delivery system")
                 .then(
                     pl.col("value").replace_strict(
