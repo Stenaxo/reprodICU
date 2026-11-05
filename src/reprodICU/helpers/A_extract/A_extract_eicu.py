@@ -1152,8 +1152,19 @@ class EICUExtractor(EICUPaths):
                     "observationoffset": self.timeseries_time_col,
                 }
             )
-            # Remove duplicate rows
-            .unique([self.icu_stay_id_col, self.timeseries_time_col])
+            # optiflow fix: rows sharing an instant are not duplicates (one may
+            # hold the blood pressures, another only PAOP or cardiac output,
+            # or the pressures are split over two rows), and unique() kept any
+            # of them. One row per instant, each value the median of the rows
+            # that have one, as the pivot does for numeric values.
+            .group_by([self.icu_stay_id_col, self.timeseries_time_col])
+            .agg(
+                pl.col(
+                    "noninvasivesystolic",
+                    "noninvasivediastolic",
+                    "noninvasivemean",
+                ).median()
+            )
             # Convert time to seconds
             .pipe(
                 self.helpers._convert_time_to_seconds_float,
