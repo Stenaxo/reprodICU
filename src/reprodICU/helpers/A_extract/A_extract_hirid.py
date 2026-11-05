@@ -33,6 +33,15 @@ class HiRIDExtractor(HiRIDPaths):
                 nasal["stringvalue"].cast(pl.Float64, strict=False),
             )
         )
+        # optiflow fix: 15001166 'Circadian rhythm' (the heart rhythm) is
+        # ordinal as well: code -> label (ordinal_vars_ref.csv) -> harmonized
+        # rhythm (heart_rhythm_mapping.yaml, which already lists the HiRID
+        # labels). It is decoded into a string value, not a number.
+        rhythm = ordinal.filter(pl.col("variableid") == 15001166)
+        self.HEART_RHYTHM_CODES = {
+            float(code): self.HEART_RHYTHM_MAP.get(label)
+            for code, label in zip(rhythm["code"], rhythm["stringvalue"])
+        }
 
     # region patient
     # Extract patient information from the patient.csv file
@@ -464,6 +473,23 @@ class HiRIDExtractor(HiRIDPaths):
                 .otherwise(pl.col("value"))
                 .alias("value")
             )
+            # optiflow fix: the heart rhythm is categorical, decoded into
+            # string_value (pivoted as a string by process_timeseries)
+            .with_columns(
+                pl.when(pl.col("variableid") == 15001166)
+                .then(
+                    pl.col("value").replace_strict(
+                        self.HEART_RHYTHM_CODES,
+                        default=None,
+                        return_dtype=pl.String,
+                    )
+                )
+                .alias("string_value"),
+                pl.when(pl.col("variableid") == 15001166)
+                .then(None)
+                .otherwise(pl.col("value"))
+                .alias("value"),
+            )
             .with_columns(
                 (pl.col("datetime") - pl.col("admissiontime"))
                 .dt.total_seconds()
@@ -477,7 +503,10 @@ class HiRIDExtractor(HiRIDPaths):
             # Remove duplicate rows
             .unique()
             # Remove rows with empty lab names
-            .filter(pl.col("value").is_not_null())
+            .filter(
+                pl.col("value").is_not_null()
+                | pl.col("string_value").is_not_null()
+            )
             # The urine output is a cumulative counter: each record is the volume
             # since the previous one. A decrease after noon is the daily reset,
             # other decreases are corrections (no volume).
