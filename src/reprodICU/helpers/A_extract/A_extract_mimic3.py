@@ -814,6 +814,12 @@ class MIMIC3Extractor(MIMIC3Paths):
             # optiflow (proposal): priority rank of the oxygen devices charted
             # at the same instant, used by keep_highest_priority_rows just
             # before the wide pivot (OXYGEN_DELIVERY_SYSTEM_PRIORITY).
+            # Oxygen flow: 227287 'O2 Flow (additional cannula)' (MetaVision)
+            # is the flow of a device added to the main one; it gives way to
+            # the main flow (223834 'O2 Flow', 227582 'BiPap O2 Flow') at the
+            # same instant instead of being averaged with it, and is kept when
+            # charted alone. mimic-code (oxygen_delivery.sql) keeps it in a
+            # column of its own.
             .with_columns(
                 pl.when(pl.col("LABEL") == "Oxygen delivery system")
                 .then(
@@ -822,6 +828,15 @@ class MIMIC3Extractor(MIMIC3Paths):
                         default=5,
                         return_dtype=pl.Int8,
                     )
+                )
+                .when(
+                    pl.col("LABEL") == "Oxygen gas flow Oxygen delivery system"
+                )
+                .then(
+                    pl.when(pl.col("ITEMID") == 227287)
+                    .then(2)
+                    .otherwise(1)
+                    .cast(pl.Int8)
                 )
                 .alias("priority_rank"),
             )

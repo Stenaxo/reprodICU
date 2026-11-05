@@ -161,7 +161,8 @@ class GlobalHelpers:
     # the rows with the lowest rank are kept. Rows without a rank are left
     # untouched, and equal ranks are all kept (the wide pivot then aggregates
     # them as before). Applied just before the wide pivot of the MIMIC
-    # chartevents, which otherwise kept an arbitrary oxygen device.
+    # chartevents, which otherwise kept an arbitrary oxygen device and the
+    # median of the main and additional cannula flows.
     def keep_highest_priority_rows(
         self,
         data: pl.LazyFrame,
