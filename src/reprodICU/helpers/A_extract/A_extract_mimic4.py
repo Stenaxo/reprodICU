@@ -835,6 +835,20 @@ class MIMIC4Extractor(MIMIC4Paths):
                 .otherwise(None)
                 .alias("value"),
             )
+            # optiflow (proposal): priority rank of the oxygen devices charted
+            # at the same instant, used by keep_highest_priority_rows just
+            # before the wide pivot (OXYGEN_DELIVERY_SYSTEM_PRIORITY).
+            .with_columns(
+                pl.when(pl.col("label") == "Oxygen delivery system")
+                .then(
+                    pl.col("value").replace_strict(
+                        self.OXYGEN_DELIVERY_SYSTEM_PRIORITY,
+                        default=5,
+                        return_dtype=pl.Int8,
+                    )
+                )
+                .alias("priority_rank"),
+            )
             .drop("itemid")
             # Remove rows with empty names
             .filter(pl.col("label").is_not_null(), pl.col("label") != "")
