@@ -808,6 +808,10 @@ class MIMIC3Extractor(MIMIC3Paths):
                         self.DELIRIUM_MAP, default=None
                     )
                 )
+                # optiflow fix: Ventilator type has no value mapping; the
+                # charted text is kept (as for eICU) instead of being dropped.
+                .when(pl.col("LABEL") == "Ventilator type")
+                .then(pl.col("VALUE"))
                 .otherwise(None)
                 .alias("VALUE"),
             )
@@ -840,11 +844,16 @@ class MIMIC3Extractor(MIMIC3Paths):
                 )
                 .alias("priority_rank"),
             )
-            # optiflow fix: 223849 'Ventilator Mode' (MetaVision) also carries
-            # a list code in VALUENUM, which the wide pivot keeps before the
-            # mapped text. The mode is categorical: only its text is kept.
+            # optiflow fix: 223849 'Ventilator Mode' and 223848 'Ventilator
+            # Type' (MetaVision) also carry a list code in VALUENUM, which the
+            # wide pivot keeps before the text. Both are categorical: only
+            # their text is kept.
             .with_columns(
-                pl.when(pl.col("LABEL") == "Ventilation mode Ventilator")
+                pl.when(
+                    pl.col("LABEL").is_in(
+                        ["Ventilation mode Ventilator", "Ventilator type"]
+                    )
+                )
                 .then(None)
                 .otherwise(pl.col("VALUENUM"))
                 .alias("VALUENUM")
