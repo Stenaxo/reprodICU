@@ -21,6 +21,18 @@ class HiRIDExtractor(HiRIDPaths):
         self.helpers = GlobalHelpers()
         self.omop = Vocabulary(paths)
         self.index_cols = [self.icu_stay_id_col, self.timeseries_time_col]
+        # optiflow fix: 15001525 'Oxygen administration by nasal cannula' is
+        # ordinal: its value is a code, whose label is given in
+        # reference_data/ordinal_vars_ref.csv (16 = '0', 17 = '1.5', 18 = '9'
+        # l/min...). Labels that are not a single flow ('2 x 4'...) become null.
+        ordinal = pl.read_csv(self.reference_data_path + "ordinal_vars_ref.csv")
+        nasal = ordinal.filter(pl.col("variableid") == 15001525)
+        self.NASAL_CANNULA_CODES = dict(
+            zip(
+                nasal["code"].cast(pl.Float64),
+                nasal["stringvalue"].cast(pl.Float64, strict=False),
+            )
+        )
 
     # region patient
     # Extract patient information from the patient.csv file
@@ -438,6 +450,19 @@ class HiRIDExtractor(HiRIDPaths):
                 ),
                 pl.col("datetime").str.to_datetime("%Y-%m-%d %H:%M:%S%.9f"),
                 pl.col("value").cast(float),
+            )
+            # optiflow fix: decode the nasal cannula oxygen codes into l/min
+            .with_columns(
+                pl.when(pl.col("variableid") == 15001525)
+                .then(
+                    pl.col("value").replace_strict(
+                        self.NASAL_CANNULA_CODES,
+                        default=None,
+                        return_dtype=pl.Float64,
+                    )
+                )
+                .otherwise(pl.col("value"))
+                .alias("value")
             )
             .with_columns(
                 (pl.col("datetime") - pl.col("admissiontime"))
