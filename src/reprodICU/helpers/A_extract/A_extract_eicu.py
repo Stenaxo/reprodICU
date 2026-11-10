@@ -30,6 +30,21 @@ class EICUExtractor(EICUPaths):
 
     # region patient
     # Extract patient information from the patient.csv file
+    # optiflow fix (change 29): the pre-ICU bound of GLOBAL_CONFIG.yaml, which
+    # SICdb, AmsterdamUMCdb and the MIMIC datasets apply, for the eICU tables.
+    def _within_pre_icu_bound(
+        self, data: pl.LazyFrame, time_col: str, end_col: str | None = None
+    ) -> pl.LazyFrame:
+        """Keep the rows after PRE_ICU_TIMESERIES_DAYS_CUTOFF days before ICU
+        admission (time_col in seconds from ICU admission). For intervals
+        (end_col given, as for medications), the bound applies to the end of
+        the interval, so that an infusion started before the bound and still
+        running after it is kept."""
+        end = pl.coalesce(end_col, time_col) if end_col else pl.col(time_col)
+        return data.filter(
+            end > -self.PRE_ICU_TIMESERIES_DAYS_CUTOFF * 24 * 3600
+        )
+
     def extract_patient_information(self) -> pl.LazyFrame:
         """
         Extract and derive comprehensive patient demographics and clinical information.
@@ -531,6 +546,8 @@ class EICUExtractor(EICUPaths):
                 self.timeseries_time_col,
                 base_unit="minutes",
             )
+            # optiflow fix: pre-ICU bound of GLOBAL_CONFIG.yaml (change 29)
+            .pipe(self._within_pre_icu_bound, self.timeseries_time_col)
             # MAKE STRUCT
             .with_columns(pl.col("LOINC_component").alias("labname"))
             .with_columns(
@@ -710,6 +727,8 @@ class EICUExtractor(EICUPaths):
                 self.timeseries_time_col,
                 base_unit="minutes",
             )
+            # optiflow fix: pre-ICU bound of GLOBAL_CONFIG.yaml (change 29)
+            .pipe(self._within_pre_icu_bound, self.timeseries_time_col)
         )
 
     # endregion
@@ -957,6 +976,8 @@ class EICUExtractor(EICUPaths):
                 self.timeseries_time_col,
                 base_unit="minutes",
             )
+            # optiflow fix: pre-ICU bound of GLOBAL_CONFIG.yaml (change 29)
+            .pipe(self._within_pre_icu_bound, self.timeseries_time_col)
         )
 
     # endregion
@@ -1061,6 +1082,8 @@ class EICUExtractor(EICUPaths):
                 self.timeseries_time_col,
                 base_unit="minutes",
             )
+            # optiflow fix: pre-ICU bound of GLOBAL_CONFIG.yaml (change 29)
+            .pipe(self._within_pre_icu_bound, self.timeseries_time_col)
         )
 
     # endregion
@@ -1106,6 +1129,8 @@ class EICUExtractor(EICUPaths):
                 self.timeseries_time_col,
                 base_unit="minutes",
             )
+            # optiflow fix: pre-ICU bound of GLOBAL_CONFIG.yaml (change 29)
+            .pipe(self._within_pre_icu_bound, self.timeseries_time_col)
         )
 
     # endregion
@@ -1171,6 +1196,8 @@ class EICUExtractor(EICUPaths):
                 self.timeseries_time_col,
                 base_unit="minutes",
             )
+            # optiflow fix: pre-ICU bound of GLOBAL_CONFIG.yaml (change 29)
+            .pipe(self._within_pre_icu_bound, self.timeseries_time_col)
         )
 
     # endregion
@@ -1302,6 +1329,8 @@ class EICUExtractor(EICUPaths):
                 self.timeseries_time_col,
                 base_unit="minutes",
             )
+            # optiflow fix: pre-ICU bound of GLOBAL_CONFIG.yaml (change 29)
+            .pipe(self._within_pre_icu_bound, self.timeseries_time_col)
         )
 
     # endregion
@@ -1707,7 +1736,11 @@ class EICUExtractor(EICUPaths):
         )
 
         # Concatenate the medication tables
-        medications = pl.concat([infusiondrug, medication], how="diagonal_relaxed")
+        medications = pl.concat(
+            [infusiondrug, medication], how="diagonal_relaxed"
+        ).pipe(  # optiflow fix: pre-ICU bound of GLOBAL_CONFIG.yaml (change 29)
+            self._within_pre_icu_bound, self.drug_start_col, self.drug_end_col
+        )
 
         medications.sink_parquet(medications_path)
 
