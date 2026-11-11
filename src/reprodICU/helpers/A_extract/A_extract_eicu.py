@@ -27,22 +27,46 @@ class EICUExtractor(EICUPaths):
         self.icu_length_of_stay = self.extract_patient_information().select(
             self.icu_stay_id_col, self.icu_length_of_stay_col
         )
+        # optiflow fix (change 37): end of each unit stay, in seconds from ICU
+        # admission (unitdischargeoffset), for the window of the eICU tables
+        self.icu_discharge = pl.scan_csv(self.patient_path).select(
+            pl.col("patientunitstayid").alias(self.icu_stay_id_col),
+            (pl.col("unitdischargeoffset") * 60).cast(float).alias("_icu_discharge"),
+        )
 
     # region patient
     # Extract patient information from the patient.csv file
-    # optiflow fix (change 29): the pre-ICU bound of GLOBAL_CONFIG.yaml, which
-    # SICdb, AmsterdamUMCdb and the MIMIC datasets apply, for the eICU tables.
-    def _within_pre_icu_bound(
+    # optiflow fix (changes 29 and 37): the window of the time series of the
+    # other datasets, for the eICU tables: from PRE_ICU_TIMESERIES_DAYS_CUTOFF
+    # days before ICU admission (GLOBAL_CONFIG.yaml) to ICU discharge
+    # (unitdischargeoffset), strictly before discharge as in the other datasets
+    # (charttime < outtime in MIMIC, TimeOfStay in SICdb).
+    def _within_stay_window(
         self, data: pl.LazyFrame, time_col: str, end_col: str | None = None
     ) -> pl.LazyFrame:
-        """Keep the rows after PRE_ICU_TIMESERIES_DAYS_CUTOFF days before ICU
-        admission (time_col in seconds from ICU admission). For intervals
-        (end_col given, as for medications), the bound applies to the end of
-        the interval, so that an infusion started before the bound and still
-        running after it is kept."""
+        """Keep the rows charted after PRE_ICU_TIMESERIES_DAYS_CUTOFF days
+        before ICU admission and strictly before ICU discharge (times in
+        seconds from ICU admission). For intervals (end_col given, as for
+        medications), the lower bound applies to the end of the interval (the
+        start when the end is missing) and the upper bound to its start, so
+        that an infusion running at either bound is kept. A stay without a
+        discharge offset keeps its rows after the lower bound."""
         end = pl.coalesce(end_col, time_col) if end_col else pl.col(time_col)
-        return data.filter(
-            end > -self.PRE_ICU_TIMESERIES_DAYS_CUTOFF * 24 * 3600
+        id_dtype = data.collect_schema()[self.icu_stay_id_col]
+        return (
+            data.join(
+                self.icu_discharge.with_columns(
+                    pl.col(self.icu_stay_id_col).cast(id_dtype)
+                ),
+                on=self.icu_stay_id_col,
+                how="left",
+                maintain_order="left",
+            )
+            .filter(
+                end > -self.PRE_ICU_TIMESERIES_DAYS_CUTOFF * 24 * 3600,
+                pl.col(time_col).lt(pl.col("_icu_discharge")).fill_null(True),
+            )
+            .drop("_icu_discharge")
         )
 
     def extract_patient_information(self) -> pl.LazyFrame:
@@ -546,8 +570,8 @@ class EICUExtractor(EICUPaths):
                 self.timeseries_time_col,
                 base_unit="minutes",
             )
-            # optiflow fix: pre-ICU bound of GLOBAL_CONFIG.yaml (change 29)
-            .pipe(self._within_pre_icu_bound, self.timeseries_time_col)
+            # optiflow fix: window of the stay (changes 29 and 37)
+            .pipe(self._within_stay_window, self.timeseries_time_col)
             # MAKE STRUCT
             .with_columns(pl.col("LOINC_component").alias("labname"))
             .with_columns(
@@ -727,8 +751,8 @@ class EICUExtractor(EICUPaths):
                 self.timeseries_time_col,
                 base_unit="minutes",
             )
-            # optiflow fix: pre-ICU bound of GLOBAL_CONFIG.yaml (change 29)
-            .pipe(self._within_pre_icu_bound, self.timeseries_time_col)
+            # optiflow fix: window of the stay (changes 29 and 37)
+            .pipe(self._within_stay_window, self.timeseries_time_col)
         )
 
     # endregion
@@ -976,8 +1000,8 @@ class EICUExtractor(EICUPaths):
                 self.timeseries_time_col,
                 base_unit="minutes",
             )
-            # optiflow fix: pre-ICU bound of GLOBAL_CONFIG.yaml (change 29)
-            .pipe(self._within_pre_icu_bound, self.timeseries_time_col)
+            # optiflow fix: window of the stay (changes 29 and 37)
+            .pipe(self._within_stay_window, self.timeseries_time_col)
         )
 
     # endregion
@@ -1082,8 +1106,8 @@ class EICUExtractor(EICUPaths):
                 self.timeseries_time_col,
                 base_unit="minutes",
             )
-            # optiflow fix: pre-ICU bound of GLOBAL_CONFIG.yaml (change 29)
-            .pipe(self._within_pre_icu_bound, self.timeseries_time_col)
+            # optiflow fix: window of the stay (changes 29 and 37)
+            .pipe(self._within_stay_window, self.timeseries_time_col)
         )
 
     # endregion
@@ -1129,8 +1153,8 @@ class EICUExtractor(EICUPaths):
                 self.timeseries_time_col,
                 base_unit="minutes",
             )
-            # optiflow fix: pre-ICU bound of GLOBAL_CONFIG.yaml (change 29)
-            .pipe(self._within_pre_icu_bound, self.timeseries_time_col)
+            # optiflow fix: window of the stay (changes 29 and 37)
+            .pipe(self._within_stay_window, self.timeseries_time_col)
         )
 
     # endregion
@@ -1196,8 +1220,8 @@ class EICUExtractor(EICUPaths):
                 self.timeseries_time_col,
                 base_unit="minutes",
             )
-            # optiflow fix: pre-ICU bound of GLOBAL_CONFIG.yaml (change 29)
-            .pipe(self._within_pre_icu_bound, self.timeseries_time_col)
+            # optiflow fix: window of the stay (changes 29 and 37)
+            .pipe(self._within_stay_window, self.timeseries_time_col)
         )
 
     # endregion
@@ -1329,8 +1353,8 @@ class EICUExtractor(EICUPaths):
                 self.timeseries_time_col,
                 base_unit="minutes",
             )
-            # optiflow fix: pre-ICU bound of GLOBAL_CONFIG.yaml (change 29)
-            .pipe(self._within_pre_icu_bound, self.timeseries_time_col)
+            # optiflow fix: window of the stay (changes 29 and 37)
+            .pipe(self._within_stay_window, self.timeseries_time_col)
         )
 
     # endregion
@@ -1738,8 +1762,8 @@ class EICUExtractor(EICUPaths):
         # Concatenate the medication tables
         medications = pl.concat(
             [infusiondrug, medication], how="diagonal_relaxed"
-        ).pipe(  # optiflow fix: pre-ICU bound of GLOBAL_CONFIG.yaml (change 29)
-            self._within_pre_icu_bound, self.drug_start_col, self.drug_end_col
+        ).pipe(  # optiflow fix: window of the stay (changes 29 and 37)
+            self._within_stay_window, self.drug_start_col, self.drug_end_col
         )
 
         medications.sink_parquet(medications_path)
